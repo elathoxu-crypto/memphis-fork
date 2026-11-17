@@ -35,7 +35,7 @@ use rusqlite::{params, OptionalExtension};
 use serde_json::{json, Value};
 
 use crate::chat_guards::{
-    emit_runtime_security_event, load_json_file, scan_memory_content, sha256_hex, write_json_file,
+    emit_runtime_security_event, load_json_file, scan_memory_content, sha256_hex,
 };
 use crate::chat_session::open_sqlite_rw;
 use crate::chat_tool_catalog::native_tool_definitions;
@@ -333,7 +333,7 @@ pub(crate) fn run_soul_write(
     let mut merged = existing;
     // Shape conflicts are REFUSED, not merged. `merge_soul_value` validates
     // before mutating, so on Err the in-memory document is still the exact
-    // bytes we loaded and we return before `write_json_file` — the operator's
+    // bytes we loaded and we return before writing — the operator's
     // existing soul memory is never touched by a malformed patch.
     merge_soul_value(&mut merged, &updates)
         .map_err(|reason| OperatorError::Message(format!("{reason}; no changes were written")))?;
@@ -1010,6 +1010,7 @@ pub(crate) fn build_fresh_soul_manifest(runtime: &OperatorRuntime) -> Value {
     })
 }
 
+/// Build the native manifest view without writing defaults over operator state.
 pub(crate) fn ensure_soul_manifest(runtime: &OperatorRuntime) -> Result<Value, OperatorError> {
     let path = runtime
         .config
@@ -1018,6 +1019,9 @@ pub(crate) fn ensure_soul_manifest(runtime: &OperatorRuntime) -> Result<Value, O
         .join("soul-manifest.json");
     let existing = load_json_file(&path);
     let mut manifest = build_fresh_soul_manifest(runtime);
+    if existing.as_ref().and_then(Value::as_object).is_none() && path.exists() {
+        manifest["trustRules"] = json!([]);
+    }
 
     if let Some(created_at) = existing
         .as_ref()
@@ -1071,13 +1075,11 @@ pub(crate) fn ensure_soul_manifest(runtime: &OperatorRuntime) -> Result<Value, O
         .as_ref()
         .and_then(|value| value.get("trustRules"))
         .and_then(Value::as_array)
-        .filter(|rules| !rules.is_empty())
         .cloned()
     {
         manifest["trustRules"] = Value::Array(existing_trust_rules);
     }
 
-    write_json_file(&path, &manifest)?;
     Ok(manifest)
 }
 
@@ -1584,6 +1586,34 @@ mod tests {
         ));
         fs::create_dir_all(&root).expect("scratch root must be creatable");
         root
+    }
+
+    #[test]
+    fn reading_soul_manifest_preserves_missing_malformed_and_custom_state() {
+        let root = scratch_root("manifest-read");
+        let directory = root.join("config");
+        fs::create_dir(&directory).unwrap();
+        let path = directory.join("soul-manifest.json");
+        let config = crate::config::OperatorConfig::from_iter([
+            ("HOME", root.to_str().unwrap()),
+            ("MEMPHIS_DATA_DIR", root.to_str().unwrap()),
+            ("DEFAULT_PROVIDER", "local-fallback"),
+        ]);
+        let runtime = crate::OperatorRuntime { config };
+
+        super::ensure_soul_manifest(&runtime).unwrap();
+        assert!(!path.exists());
+
+        for bytes in [
+            "{malformed",
+            r#"{"cognitiveModeUpdatedAt":"2026-04-01","identity":{"did":"did:test"},"custom":4,"trustRules":[]}"#,
+        ] {
+            fs::write(&path, bytes).unwrap();
+            let manifest = super::ensure_soul_manifest(&runtime).unwrap();
+            assert_eq!(fs::read_to_string(&path).unwrap(), bytes);
+            assert_eq!(manifest["trustRules"], json!([]));
+        }
+        fs::remove_dir_all(root).unwrap();
     }
 
     /// The scratch file names left behind in a chain directory.

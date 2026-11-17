@@ -347,17 +347,6 @@ pub(crate) fn load_json_file(path: &Path) -> Option<Value> {
     serde_json::from_str(&raw).ok()
 }
 
-pub(crate) fn write_json_file(path: &Path, value: &Value) -> Result<(), OperatorError> {
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent).map_err(|error| OperatorError::Io(error.to_string()))?;
-    }
-    fs::write(
-        path,
-        serde_json::to_vec_pretty(value).map_err(|error| OperatorError::Json(error.to_string()))?,
-    )
-    .map_err(|error| OperatorError::Io(error.to_string()))
-}
-
 #[cfg(test)]
 mod tests {
     use super::sanitize_json;

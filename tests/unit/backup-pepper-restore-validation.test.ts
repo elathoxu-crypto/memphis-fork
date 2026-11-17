@@ -105,4 +105,22 @@ describe('restoreBackup — --pepper-restore validates BEFORE destructive swap',
       'MEMPHIS_VAULT_PEPPER=sufficientlyLongPepper999',
     );
   });
+
+  it.each(['syntheticPepper\nINJECTED=1', 'syntheticPepper  # suffix'])(
+    'rejects a pepper that dotenv cannot safely round-trip before touching the target',
+    async (pepperRestore) => {
+      const envPath = join(env.memphisRoot, '.env');
+      const before = readFileSync(envPath, 'utf8');
+      await expect(
+        restoreBackup({
+          file: 'not-opened.tar.gz',
+          memphisRoot: env.memphisRoot,
+          backupRoot: env.backupRoot,
+          pepperRestore,
+        }),
+      ).rejects.toThrow(/cannot be serialized safely/);
+      expect(readFileSync(envPath, 'utf8')).toBe(before);
+      expect(readdirSync(env.backupRoot)).toEqual([]);
+    },
+  );
 });

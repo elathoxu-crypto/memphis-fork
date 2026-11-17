@@ -17,13 +17,14 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import readline from 'node:readline/promises';
 import { fileURLToPath } from 'node:url';
 import { gunzipSync, gzipSync } from 'node:zlib';
 
 import chalk from 'chalk';
 import cliProgress from 'cli-progress';
+import { parse } from 'dotenv';
 
 import {
   DATABASE_PLACEMENT_MANIFEST,
@@ -38,6 +39,8 @@ import { getDataDir } from '../../../config/paths.js';
 import { requireOperatorAuth } from '../../auth/operator-gate.js';
 import { resolveDotEnvPath } from '../../config/dotenv-file.js';
 import { classifyField } from '../../config/mutability.js';
+import { writePrivateAtomicFile } from '../../config/private-atomic-file.js';
+import { resolveVaultPath } from '../../storage/vault-paths.js';
 import type { CliContext } from '../context.js';
 import { print } from '../utils/render.js';
 
@@ -770,13 +773,8 @@ function applyRedactedDotEnv(memphisRoot: string): number {
   const stagedRaw = readFileSync(stagedPath, 'utf8');
   const installEnvPath = resolveDotEnvPath();
   const existingRaw = existsSync(installEnvPath) ? readFileSync(installEnvPath, 'utf8') : '';
-  const existingKeys = new Set<string>();
-  for (const line of existingRaw.split(/\r?\n/)) {
-    const eq = line.indexOf('=');
-    if (eq > 0 && !line.trim().startsWith('#')) {
-      existingKeys.add(line.slice(0, eq).trim());
-    }
-  }
+  const existing = parse(existingRaw);
+  const existingKeys = new Set(Object.keys(existing));
 
   const additions: string[] = [];
   for (const line of stagedRaw.split(/\r?\n/)) {
@@ -785,7 +783,12 @@ function applyRedactedDotEnv(memphisRoot: string): number {
     const eq = line.indexOf('=');
     if (eq <= 0) continue;
     const key = line.slice(0, eq).trim();
-    if (existingKeys.has(key)) continue;
+    if (
+      existingKeys.has(key) ||
+      !/^[A-Za-z_][A-Za-z0-9_]*$/.test(key) ||
+      classifyField(key) === 'secret'
+    )
+      continue;
     additions.push(line);
   }
 
@@ -803,7 +806,17 @@ function applyRedactedDotEnv(memphisRoot: string): number {
     existingRaw.endsWith('\n') || existingRaw === ''
       ? `${existingRaw}# memphis-backup: restored .env keys (Phase C, ${new Date().toISOString()})\n${additions.join('\n')}\n`
       : `${existingRaw}\n# memphis-backup: restored .env keys (Phase C, ${new Date().toISOString()})\n${additions.join('\n')}\n`;
-  writeFileSync(installEnvPath, merged, 'utf8');
+  const mergedValues = parse(merged);
+  if (
+    mergedValues.MEMPHIS_VAULT_PEPPER !== existing.MEMPHIS_VAULT_PEPPER ||
+    Object.entries(existing).some(([key, value]) => mergedValues[key] !== value)
+  ) {
+    process.stderr.write(
+      '[memphis-backup] skipped dotenv merge: it would change existing values.\n',
+    );
+    return 0;
+  }
+  writePrivateAtomicFile(installEnvPath, merged);
 
   try {
     unlinkSync(stagedPath);
@@ -989,7 +1002,42 @@ function applyRestoredVaultPepper(_memphisRoot: string, pepper: string): void {
   const serialized = `${next
     .filter((line, index, lines) => !(index === lines.length - 1 && line === ''))
     .join('\n')}\n`;
-  writeFileSync(envPath, serialized, 'utf8');
+  if (parse(serialized).MEMPHIS_VAULT_PEPPER !== pepper) {
+    throw new Error('Restore cannot serialize the supplied vault pepper safely.');
+  }
+  writePrivateAtomicFile(envPath, serialized);
+}
+
+function assertRestoreVaultSafe(memphisRoot: string, pepperRestore?: string): void {
+  const envPath = resolveDotEnvPath();
+  const saved = existsSync(envPath) ? parse(readFileSync(envPath, 'utf8')) : {};
+  const env = { ...saved, ...process.env };
+  const configured = (['vault-state.json', 'vault-entries.json'] as const).map((file) =>
+    resolveVaultPath(file, env),
+  );
+  const candidates = [
+    ...configured,
+    ...(['vault-state.json', 'vault-entries.json'] as const).flatMap((file) => [
+      join(memphisRoot, file),
+      join(memphisRoot, 'vault', file),
+    ]),
+  ];
+  const restoringActiveDataDir = resolve(getDataDir(env)) === memphisRoot;
+  for (const path of new Set(candidates)) {
+    const offset = relative(memphisRoot, path);
+    const isInsideTarget =
+      offset !== '' && !isAbsolute(offset) && offset !== '..' && !offset.startsWith(`..${sep}`);
+    if (!isInsideTarget && !restoringActiveDataDir && pepperRestore === undefined) continue;
+    try {
+      lstatSync(path);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') continue;
+      throw error;
+    }
+    throw new Error(
+      'Restore refused: this archive does not carry a protected vault. Use a verified recovery set for the vault, dotenv and DID.',
+    );
+  }
 }
 
 async function askRestoreConfirmation(file: string): Promise<boolean> {
@@ -1343,8 +1391,6 @@ export async function restoreBackup(options: RestoreOptions): Promise<{
 }> {
   const memphisRoot = getMemphisRoot(options.memphisRoot);
   const backupRoot = getBackupsRoot(options);
-  mkdirSync(memphisRoot, { recursive: true });
-  mkdirSync(backupRoot, { recursive: true });
 
   // Codex P1 fix (PR #86): validate --pepper-restore BEFORE any
   // destructive disk operation. Previously the length check happened
@@ -1357,6 +1403,17 @@ export async function restoreBackup(options: RestoreOptions): Promise<{
   if (options.pepperRestore !== undefined && options.pepperRestore.length < 12) {
     throw new Error('--pepper-restore: pepper must be at least 12 characters');
   }
+  if (
+    options.pepperRestore !== undefined &&
+    (/[\r\n\0]/.test(options.pepperRestore) ||
+      parse(`MEMPHIS_VAULT_PEPPER=${options.pepperRestore}\n`).MEMPHIS_VAULT_PEPPER !==
+        options.pepperRestore)
+  ) {
+    throw new Error('--pepper-restore: pepper cannot be serialized safely.');
+  }
+  assertRestoreVaultSafe(resolve(memphisRoot), options.pepperRestore);
+  mkdirSync(memphisRoot, { recursive: true });
+  mkdirSync(backupRoot, { recursive: true });
 
   const backupPath = resolveBackupFile(options.file, backupRoot);
   const check = await verifyBackup({
@@ -1389,9 +1446,17 @@ export async function restoreBackup(options: RestoreOptions): Promise<{
   const stagedRoot = join(extractRoot, 'data');
   mkdirSync(stagedRoot, { recursive: true });
 
-  withProgress('Extracting backup', options.showProgress ?? true, () => {
-    extractArchive(backupPath, stagedRoot);
-  });
+  try {
+    withProgress('Extracting backup', options.showProgress ?? true, () => {
+      extractArchive(backupPath, stagedRoot);
+    });
+    // Archive verification and the safety backup yielded to other work.
+    // Recheck before the first live rename.
+    assertRestoreVaultSafe(memphisRoot, options.pepperRestore);
+  } catch (error) {
+    rmSync(extractRoot, { recursive: true, force: true });
+    throw error;
+  }
 
   const tempCurrent = mkdtempSync(join(tmpdir(), 'memphis-current-'));
   const memphisItems = readdirSync(memphisRoot);

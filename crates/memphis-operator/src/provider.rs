@@ -771,6 +771,7 @@ impl ProviderRuntime {
         let mut tool_calls = Vec::new();
         let mut token_usage = None;
         let mut last_emitted_usage = None;
+        let mut finished = false;
 
         for line in reader.lines() {
             ensure_not_cancelled(cancel_flag)?;
@@ -816,8 +817,20 @@ impl ProviderRuntime {
                 .and_then(Value::as_bool)
                 .unwrap_or(false)
             {
+                if payload.get("done_reason").and_then(Value::as_str) == Some("length") {
+                    return Err(OperatorError::Message(
+                        "ollama stream reached the output limit before completing".to_string(),
+                    ));
+                }
+                finished = true;
                 break;
             }
+        }
+
+        if !finished {
+            return Err(OperatorError::Message(
+                "ollama stream ended without a terminal response".to_string(),
+            ));
         }
 
         let token_usage = token_usage.or_else(|| {
@@ -4288,6 +4301,52 @@ mod tests {
                 !super::minimax_supports_vision(model),
                 "{model} must stay text-only"
             );
+        }
+    }
+
+    #[test]
+    fn ollama_stream_requires_an_untruncated_terminal_response() {
+        for (terminal_line, expected_error) in [
+            (r#"{"done":true,"done_reason":"stop"}"#, None),
+            ("", Some("ended without a terminal response")),
+            (
+                r#"{"done":true,"done_reason":"length"}"#,
+                Some("reached the output limit"),
+            ),
+        ] {
+            let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+            let base_url = format!("http://{}", listener.local_addr().unwrap());
+            let body = format!(
+                "{}\n{terminal_line}\n",
+                r#"{"message":{"content":"partial or complete"},"done":false}"#
+            );
+            let server = std::thread::spawn(move || {
+                let (mut stream, _) = listener.accept().unwrap();
+                let mut request = [0_u8; 4096];
+                let _ = stream.read(&mut request).unwrap();
+                write!(
+                    stream,
+                    "HTTP/1.1 200 OK\r\nContent-Type: application/x-ndjson\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                    body.len()
+                )
+                .unwrap();
+            });
+            let config = config_from(&[("OLLAMA_URL", &base_url)]);
+            let provider = resolve_provider(&config, Some("ollama")).unwrap();
+            let result = provider.chat_stream_with_cancel(
+                &[ChatMessage::User {
+                    content: "Check termination".to_string(),
+                }],
+                &ChatRequestOptions::default(),
+                &[],
+                None,
+                |_| {},
+            );
+            server.join().unwrap();
+            match expected_error {
+                Some(expected) => assert!(result.unwrap_err().to_string().contains(expected)),
+                None => assert_eq!(result.unwrap().content, "partial or complete"),
+            }
         }
     }
 

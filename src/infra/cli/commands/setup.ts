@@ -1,4 +1,4 @@
-import { copyFileSync, existsSync, mkdirSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { stdin as input, stdout as output } from 'node:process';
 import readline from 'node:readline/promises';
@@ -37,6 +37,7 @@ import {
 } from '../../auth/operator-gate.js';
 import { resolveDotEnvPath } from '../../config/dotenv-file.js';
 import { loadConfig } from '../../config/env.js';
+import { writeSetupDotEnv } from '../../config/setup-dotenv.js';
 import { buildHealthPayload } from '../../http/health.js';
 import { resolveInstallRoot } from '../../runtime/install-root.js';
 import { repairRuntimeState, type RuntimeRepairResult } from '../../runtime/runtime-repair.js';
@@ -111,6 +112,7 @@ const PROVIDER_CHOICES: SetupProviderChoice[] = [
   'local',
 ];
 const EMBEDDING_CHOICES: EmbeddingMode[] = ['local', 'ollama', 'openai-compatible'];
+const DEFAULT_SETUP_OLLAMA_MODEL = 'qwen2.5-coder:0.5b';
 
 const PROVIDER_LABELS: Record<SetupProviderChoice, string> = {
   ollama: 'Ollama',
@@ -146,8 +148,7 @@ function defaultProviderBaseUrl(provider: SetupProviderChoice): string | undefin
 }
 
 function defaultEmbeddingMode(provider: SetupProviderChoice): EmbeddingMode {
-  if (provider === 'ollama') return 'ollama';
-  if (provider === 'local') return 'local';
+  if (provider === 'ollama' || provider === 'local') return 'local';
   return 'openai-compatible';
 }
 
@@ -225,7 +226,6 @@ export function buildSetupEnv(answers: SetupAnswers): {
     MEMPHIS_OWNER_NAME: answers.ownerName?.trim() || DEFAULT_OWNER_NAME,
     MEMPHIS_API_TOKEN: answers.apiToken?.trim() || generateApiToken(),
     DATABASE_URL: normalized.databaseUrl,
-    MEMPHIS_AUTONOMY_MODE: 'full',
     MEMPHIS_VAULT_PEPPER: answers.vaultPepper,
     RUST_CHAIN_ENABLED: 'true',
     LOCAL_FALLBACK_ENABLED: 'true',
@@ -235,9 +235,10 @@ export function buildSetupEnv(answers: SetupAnswers): {
 
   switch (answers.provider) {
     case 'ollama':
-      env.DEFAULT_PROVIDER = 'local-fallback';
+      env.DEFAULT_PROVIDER = 'ollama';
+      env.MEMPHIS_PROVIDER_CASCADE = 'ollama,local-fallback';
       env.OLLAMA_URL = 'http://127.0.0.1:11434';
-      env.OLLAMA_MODEL = 'qwen2.5-coder:3b';
+      env.OLLAMA_MODEL = DEFAULT_SETUP_OLLAMA_MODEL;
       break;
     case 'local':
       env.DEFAULT_PROVIDER = 'local-fallback';
@@ -318,7 +319,9 @@ function renderEnvFile(env: Record<string, string>, provider: SetupProviderChoic
     'LOG_FORMAT',
     'MEMPHIS_AGENT_NAME',
     'MEMPHIS_OWNER_NAME',
+    'MEMPHIS_API_TOKEN',
     'DEFAULT_PROVIDER',
+    'MEMPHIS_PROVIDER_CASCADE',
     'LOCAL_FALLBACK_ENABLED',
     'ANTHROPIC_BASE_URL',
     'ANTHROPIC_VAULT_KEY',
@@ -435,7 +438,7 @@ function validateSetupEnv(
 
   if (provider === 'ollama') {
     warnings.push(
-      'Generation stays on local-fallback today; Ollama values are prepared for local model discovery and embeddings.',
+      `Local chat requires a running Ollama instance. Install the model with: ollama pull ${DEFAULT_SETUP_OLLAMA_MODEL}`,
     );
   }
 
@@ -594,11 +597,12 @@ export async function runSetupWizard(options: {
             models?: Array<{ name: string }>;
           };
           const models = tagsData.models?.map((m) => m.name) ?? [];
-          const embedModel = embeddingModel || 'nomic-embed-text';
-          if (!models.some((m) => m.startsWith(embedModel))) {
-            console.log(
-              `- Ollama model "${embedModel}" not found locally. Run: ollama pull ${embedModel}`,
-            );
+          const requiredModels = new Set([DEFAULT_SETUP_OLLAMA_MODEL]);
+          if (embeddingMode === 'ollama') requiredModels.add(embeddingModel);
+          for (const model of requiredModels) {
+            if (!models.includes(model) && !models.includes(`${model}:latest`)) {
+              console.log(`- Ollama model "${model}" not found locally. Run: ollama pull ${model}`);
+            }
           }
         }
       } catch {
@@ -611,8 +615,8 @@ export async function runSetupWizard(options: {
       throw new Error('Setup cancelled by user before writing files.');
     }
 
+    writeSetupDotEnv(envPath, built.content, process.env, options.force === true);
     mkdirSync(resolve(normalizeDataDirectory(dataDirectory).directory), { recursive: true });
-    writeFileSync(envPath, built.content, 'utf8');
     const { path: agentProfilePath } = writeAgentProfile({
       agentName: built.env.MEMPHIS_AGENT_NAME,
       ownerName: built.env.MEMPHIS_OWNER_NAME,
@@ -1126,20 +1130,15 @@ async function runInitCommand(context: CliContext): Promise<InitCommandResult> {
     // Bootstrap.sh still does MORE than just create .env (token generation,
     // systemd unit install, agent profile). It runs from install.sh now;
     // this code path is the safety net for the manual install case.
-    try {
-      const envPath = resolveDotEnvPath(process.env);
-      const installRoot = resolveInstallRoot({ rawEnv: process.env });
-      const examplePath = join(installRoot, '.env.example');
-      if (existsSync(examplePath)) {
-        copyFileSync(examplePath, envPath);
-        warnings.push(
-          `created ${envPath} from .env.example; you may want to run \`npm run bootstrap\` to populate the random tokens`,
-        );
-        // Re-inspect now that .env exists.
-        initialStatus = inspectFirstRunStatus(process.env);
-      }
-    } catch {
-      // Fall through to the original error if auto-create fails.
+    const envPath = resolveDotEnvPath(process.env);
+    const installRoot = resolveInstallRoot({ rawEnv: process.env });
+    const examplePath = join(installRoot, '.env.example');
+    if (existsSync(examplePath)) {
+      writeSetupDotEnv(envPath, readFileSync(examplePath, 'utf8'), process.env, false);
+      warnings.push(
+        `created ${envPath} from .env.example; you may want to run \`npm run bootstrap\` to populate the random tokens`,
+      );
+      initialStatus = inspectFirstRunStatus(process.env);
     }
     if (!initialStatus.envPresent) {
       throw new Error('memphis init requires a configured .env file; run npm run bootstrap first');

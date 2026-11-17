@@ -129,7 +129,7 @@ describe('soul manifest', () => {
 
     const second = ensureSoulManifest(env);
     expect(second.identity.createdAt).toBe(originalCreatedAt);
-    // generatedAt should differ since we waited
+    // The view may be refreshed independently of the stored manifest.
     expect(new Date(second.generatedAt).getTime()).toBeGreaterThanOrEqual(
       new Date(first.generatedAt).getTime(),
     );
@@ -149,5 +149,24 @@ describe('soul manifest', () => {
 
     const second = ensureSoulManifest(env);
     expect(second.identity.did).toBe('did:key:test123');
+  });
+
+  it('leaves operator extensions and explicit empty trust rules on disk', () => {
+    const existing = ensureSoulManifest(env);
+    const manifestPath = join(dataDir, 'config', 'soul-manifest.json');
+    const bytes = JSON.stringify({ ...existing, trustRules: [], custom: { keep: true } });
+    writeFileSync(manifestPath, bytes, 'utf8');
+
+    expect(ensureSoulManifest(env).trustRules).toEqual([]);
+    expect(readFileSync(manifestPath, 'utf8')).toBe(bytes);
+  });
+
+  it('leaves a malformed manifest available for operator recovery', () => {
+    ensureSoulManifest(env);
+    const manifestPath = join(dataDir, 'config', 'soul-manifest.json');
+    writeFileSync(manifestPath, '{malformed', 'utf8');
+
+    expect(ensureSoulManifest(env).trustRules).toEqual([]);
+    expect(readFileSync(manifestPath, 'utf8')).toBe('{malformed');
   });
 });

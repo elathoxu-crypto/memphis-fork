@@ -1,5 +1,27 @@
 # S1–S9 execution record
 
+## Setup and ordinary restore vault guard — 2026-11-17
+
+Local source only. Setup and init template publication now use the configuration
+journals and private atomic file publication. Force setup refuses detectable
+vault data, and bootstrap refuses to mint a new pepper when a vault exists
+without a matching dotenv configuration. Bootstrap preserves an existing agent
+profile and does not print credential previews.
+
+Ordinary backup restore refuses before swapping a target whose vault it could
+remove or unpair. Those archives omit vault files. The existing blank-target
+restore path remains available. Restore rejects non-round-trippable pepper
+input and will not import secret assignments from a redacted config snapshot.
+
+The isolated encrypted-v2 fixture exercises forced setup, the real init and
+bootstrap entries with missing dotenv, and restore refusal. A fresh process
+decrypts the test credential and derives the original DID from the recovered
+seed. Dotenv, vault state, entries and DID remain byte-identical. Twenty-two
+distinct targeted TypeScript tests and a shell bootstrap fixture passed. The
+shell fixture stubbed npm build and service installation. This covers the
+tested S1/V01 cases and a restore safety guard. Complete protected-set restore
+(S4/V08–V09), deployment and release acceptance remain open.
+
 ## E18-LAUNCH-PATHS — deployed 2026-10-18
 
 Codex implemented and self-reviewed the explicit runtime-root path fix. TS passed

@@ -30,15 +30,27 @@ Linux, macOS lub WSL2:
 curl -fsSL https://raw.githubusercontent.com/Memphis-Chains/memphis/main/scripts/install.sh | bash
 ```
 
-Instalator przygotowuje zależności, kod, lokalną konfigurację i scaffold profilu operatora. Nie kopiuje cudzej tożsamości ani sekretów. Każdy operator inicjalizuje własny vault, tożsamość i pierwsze łańcuchy podczas `memphis init`:
+Instalator przygotowuje zależności, kod i lokalną konfigurację. Polecenie
+`memphis init` tworzy lokalny vault, profil operatora i pierwsze łańcuchy:
 
 ```bash
 memphis init
+ollama pull qwen2.5-coder:0.5b
 memphis doctor
 memphis service install
 memphis service restart
 memphis tui
 ```
+
+Domyślny lokalny profil używa Ollamy do rozmowy. Pobranie modelu jest
+jednorazowe, a do rozmowy potrzebna jest działająca Ollama. Vault i
+wyszukiwanie lokalnej pamięci nie wymagają klucza API dostawcy.
+Kryptograficzne DID do podpisów lub federacji tworzy osobne polecenie
+`memphis identity init`.
+
+Na wolnym CPU sprawdź bezpośrednią odpowiedź modelu przez
+`memphis chat --provider-only --input "Ile to dwa plus dwa?"`.
+Ten tryb pomija orkiestrację agenta, narzędzia i automatyczny zapis pamięci.
 
 Możesz połączyć instalację z interaktywnym pierwszym uruchomieniem:
 

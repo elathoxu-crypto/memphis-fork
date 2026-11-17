@@ -1,4 +1,13 @@
-import { chmodSync, existsSync, mkdirSync, renameSync, statSync, writeFileSync } from 'node:fs';
+import {
+  chmodSync,
+  existsSync,
+  linkSync,
+  mkdirSync,
+  renameSync,
+  statSync,
+  unlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { dirname } from 'node:path';
 
 import { resolveVaultPath } from './vault-paths.js';
@@ -50,7 +59,11 @@ function isPermissive(mode: number): boolean {
  * chmodSync follows the write so prior pre-existing files at the
  * destination get their perms tightened too.
  */
-export function writeSensitiveFile(path: string, content: string): void {
+export function writeSensitiveFile(
+  path: string,
+  content: string,
+  options: { onlyIfMissing?: boolean } = {},
+): void {
   const dir = dirname(path);
   mkdirSync(dir, { recursive: true, mode: SENSITIVE_DIR_PERMS });
   const tmpPath = `${path}.tmp-${process.pid}-${Date.now()}`;
@@ -59,6 +72,16 @@ export function writeSensitiveFile(path: string, content: string): void {
     chmodSync(tmpPath, SENSITIVE_PERMS);
   } catch {
     // Best-effort — Windows / non-POSIX filesystems may reject.
+  }
+  if (options.onlyIfMissing) {
+    try {
+      linkSync(tmpPath, path);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
+    } finally {
+      unlinkSync(tmpPath);
+    }
+    return;
   }
   // Atomic swap. POSIX rename(2) preserves the destination's inode
   // perms only if the source already had them — that's why we set the

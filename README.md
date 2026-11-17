@@ -32,7 +32,7 @@ Linux, macOS, or WSL2. Installs Node 22, Rust stable, Ollama, clones the repo, b
 curl -fsSL https://raw.githubusercontent.com/Memphis-Chains/memphis/main/scripts/install.sh | bash
 ```
 
-Add `--with-init` to continue into the interactive first-run flow (operator passphrase, vault passphrase, recovery answers, and identity):
+Add `--with-init` to continue into the interactive first-run flow (operator passphrase, vault passphrase, recovery answers, and operator profile):
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/Memphis-Chains/memphis/main/scripts/install.sh | bash -s -- --with-init
@@ -41,11 +41,21 @@ curl -fsSL https://raw.githubusercontent.com/Memphis-Chains/memphis/main/scripts
 Then (or if you left `--with-init` off) walk the canonical first-run:
 
 ```bash
-memphis init                    # passphrase, vault, identity, first chain writes
+memphis init                    # passphrase, vault, operator profile, first chain writes
+ollama pull qwen2.5-coder:0.5b   # one-time download for the default local chat preset
 memphis provider add anthropic  # (optional) cloud provider — repeat for minimax/deepseek/glm
 memphis service install && memphis service restart  # Linux / WSL systemd-user only; see macOS note below
 memphis tui                     # open the native operator cockpit
 ```
+
+Keep Ollama running for local chat. The local preset needs no API key or
+separate embedding model. `local-fallback` provides a diagnostic response
+when language-model generation is unavailable. Run `memphis identity init`
+if you need a cryptographic DID for signing or federation.
+
+For a direct local model response on a slow CPU, use
+`memphis chat --provider-only --input "What is two plus two?"`.
+This skips the agent prompt, tool loop and automatic memory writes.
 
 `memphis init` also installs seven safe, typed scheduler jobs (health/SLO
 watch, scoped backup retention, read-only doctor diagnosis, daily/weekly
@@ -106,7 +116,8 @@ curl -fsSL https://raw.githubusercontent.com/Memphis-Chains/memphis/main/scripts
 The installer prepares local configuration and an operator-profile scaffold, but it does not initialize the vault or write the first identity/memory chains. First-run remains deliberate. After install, run these commands in order:
 
 ```bash
-memphis init              # passphrase, vault, identity, first chain writes
+memphis init              # passphrase, vault, operator profile, first chain writes
+ollama pull qwen2.5-coder:0.5b
 memphis doctor            # verify everything is healthy
 memphis service install   # install & enable systemd user service
 memphis service restart   # start (or restart) the runtime

@@ -49,6 +49,14 @@ describe('writeSensitiveFile', () => {
     expect(statSync(target).mode & 0o777).toBe(0o600);
     expect(readFileSync(target, 'utf8')).toBe('{"new":true}');
   });
+
+  it('can initialize a file without replacing existing bytes', () => {
+    const target = join(dir, 'manifest.json');
+    writeSensitiveFile(target, '{"first":true}', { onlyIfMissing: true });
+    writeSensitiveFile(target, '{"second":true}', { onlyIfMissing: true });
+    expect(readFileSync(target, 'utf8')).toBe('{"first":true}');
+    expect(statSync(target).mode & 0o777).toBe(0o600);
+  });
 });
 
 describe('healSensitiveFilePerms', () => {

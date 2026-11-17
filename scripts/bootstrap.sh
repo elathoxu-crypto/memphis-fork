@@ -15,48 +15,13 @@ require_cmd() {
   command -v "$1" >/dev/null 2>&1 || fail "missing required command: $1"
 }
 
-ensure_env_file() {
-  if [[ -f "$ENV_FILE" ]]; then
-    log "Using existing env file: $ENV_FILE"
-    return
-  fi
-
-  [[ -f "$ENV_EXAMPLE" ]] || fail "missing template: $ENV_EXAMPLE"
-  cp "$ENV_EXAMPLE" "$ENV_FILE"
-  log "Created env file from template: $ENV_FILE"
-}
-
-ensure_env_value() {
-  local key="$1"
-  local value="$2"
-
-  if grep -Eq "^${key}=" "$ENV_FILE"; then
-    local current
-    current="$(grep -E "^${key}=" "$ENV_FILE" | tail -n 1 | cut -d= -f2-)"
-    if [[ -n "${current// }" ]]; then
-      echo "existing"
-      return
-    fi
-    sed -i "s|^${key}=.*|${key}=${value}|" "$ENV_FILE"
-    echo "generated"
-    return
-  fi
-
-  printf '%s=%s\n' "$key" "$value" >> "$ENV_FILE"
-  echo "generated"
-}
-
-generate_token() {
-  node -e "console.log(require('node:crypto').randomBytes(24).toString('base64url'))"
-}
-
-generate_pepper() {
-  node -e "console.log('memphis-' + require('node:crypto').randomBytes(16).toString('hex'))"
-}
-
 env_value() {
-  local key="$1"
-  grep -E "^${key}=" "$ENV_FILE" | tail -n 1 | cut -d= -f2- || true
+  node --input-type=module -e '
+    import { readFileSync } from "node:fs";
+    import { parse } from "dotenv";
+    const [file, key] = process.argv.slice(1);
+    process.stdout.write(parse(readFileSync(file, "utf8"))[key] ?? "");
+  ' "$ENV_FILE" "$1"
 }
 
 systemd_user_available() {
@@ -171,21 +136,15 @@ ensure_agent_profile() {
         'Treat vault-managed secrets as operator-controlled state.',
       ],
     };
-    fs.writeFileSync(path, JSON.stringify(profile, null, 2) + '\\n', 'utf8');
+    try {
+      fs.writeFileSync(path, JSON.stringify(profile, null, 2) + '\\n', {flag: 'wx', mode: 0o600});
+    } catch (error) {
+      if (error.code !== 'EEXIST') throw error;
+    }
   " "$profile_path" "$agent_name" "$owner_name"
 
   ENSURED_AGENT_PROFILE_PATH="$profile_path"
   log "Ensured agent profile: $profile_path"
-}
-
-preview_secret() {
-  local value="$1"
-  local length="${#value}"
-  if [[ "$length" -le 8 ]]; then
-    printf '********'
-    return
-  fi
-  printf '%s...%s' "${value:0:4}" "${value: -4}"
 }
 
 is_tty() {
@@ -217,71 +176,30 @@ detect_ollama_models() {
   echo "$models"
 }
 
-check_ollama_model() {
-  local configured_model="${1:-cogito:3b}"
-  local available="$2"
-  if echo "$available" | grep -q "^${configured_model}$"; then
-    return 0
-  fi
-  return 1
-}
-
 main() {
   require_cmd node
   require_cmd npm
 
   cd "$ROOT_DIR"
-  ensure_env_file
-
-  local api_token_status vault_pepper_status
-  api_token_status="$(ensure_env_value "MEMPHIS_API_TOKEN" "$(generate_token)")"
-  vault_pepper_status="$(ensure_env_value "MEMPHIS_VAULT_PEPPER" "$(generate_pepper)")"
-  ensure_env_value "MEMPHIS_AGENT_NAME" "${MEMPHIS_AGENT_NAME:-Memphis Agent}" >/dev/null
-  ensure_env_value "MEMPHIS_OWNER_NAME" "${MEMPHIS_OWNER_NAME:-local operator}" >/dev/null
-  ensure_env_value "RUST_CHAIN_ENABLED" "true" >/dev/null
-  ensure_env_value "RUST_EMBED_PERSIST_ENABLED" "true" >/dev/null
-  # Do NOT seed RUST_EMBED_PERSIST_PATH. The default in
-  # crates/memphis-paths/src/lib.rs is ~/.memphis/embed/index-v1.json, and
-  # a relative path here resolves against $ROOT_DIR (the repo), not the
-  # data dir. Every CLI invocation that cd's into the repo would then
-  # write its embed index to <repo>/data/embed-index.json — a second,
-  # stale index that `embed search` reads back and that pollutes the
-  # working tree. This is what made rc-drill return journal-3/journal-4
-  # instead of the anchor it had just stored: the store landed in the
-  # repo, the search read a different file. .env.example:123 already
-  # documents this as an optional override; seeding it contradicts that.
-  # See journal-543 and decision "embed path diversion".
-  if [[ -n "${MEMPHIS_TELEGRAM_BOT_TOKEN:-}" ]]; then
-    log "Telegram token detected — auto-enabling channel gateway"
-    ensure_env_value "MEMPHIS_CHANNEL_GATEWAY_ENABLED" "true" >/dev/null
+  if [[ ! -d "$ROOT_DIR/node_modules" ]]; then
+    log "Installing npm dependencies"
+    npm ci
   fi
+
+  local generated_secrets
+  generated_secrets="$(node --import tsx "$ROOT_DIR/scripts/bootstrap-dotenv.mts" "$ENV_FILE" "$ENV_EXAMPLE")"
   ensure_agent_profile
 
-  # S17-2: Ollama model auto-detection
-  if command -v ollama >/dev/null 2>&1; then
-    local available_models
+  if [[ "$(env_value DEFAULT_PROVIDER)" == "ollama" ]] && command -v ollama >/dev/null 2>&1; then
+    local available_models configured_model
     available_models="$(detect_ollama_models)"
-    if [[ -n "$available_models" ]]; then
-      local configured_model
-      configured_model="$(env_value OLLAMA_MODEL)"
-      if [[ -z "${configured_model// }" ]]; then
-        configured_model="cogito:3b"
-      fi
-      if ! echo "$available_models" | grep -q "^${configured_model}$"; then
-        local first_model
-        first_model="$(echo "$available_models" | head -n1)"
-        if [[ -n "$first_model" ]]; then
-          log "Configured Ollama model '$configured_model' not available."
-          log "Auto-selecting first available model: $first_model"
-          ensure_env_value "OLLAMA_MODEL" "$first_model" >/dev/null
-        fi
-      fi
-    else
-      log "Ollama found but no models installed. Install models with: ollama pull <model>"
+    configured_model="$(env_value OLLAMA_MODEL)"
+    if [[ -n "$configured_model" ]] && ! grep -Fxq -- "$configured_model" <<< "$available_models"; then
+      log "Configured chat model '$configured_model' not found in the local Ollama list. Start Ollama and run: ollama pull $configured_model"
     fi
   fi
 
-  if [[ "$api_token_status" == "generated" ]] || [[ "$vault_pepper_status" == "generated" ]]; then
+  if [[ "$generated_secrets" == "true" ]]; then
     echo
     echo "  ┌───────────────────────────────────────────────────────────┐"
     echo "  │  WARNING: New secrets were generated in .env              │"
@@ -293,11 +211,6 @@ main() {
   fi
 
   mkdir -p "$ROOT_DIR/data" "$HOME/.memphis/embed"
-
-  if [[ ! -d "$ROOT_DIR/node_modules" ]]; then
-    log "Installing npm dependencies"
-    npm ci
-  fi
 
   log "Building Memphis"
   npm run build
@@ -318,9 +231,9 @@ main() {
   echo "Secret awareness:"
   echo "  .env: $ENV_FILE"
   echo "  Agent profile: $ENSURED_AGENT_PROFILE_PATH"
-  echo "  MEMPHIS_API_TOKEN ($api_token_status): $(preview_secret "$(env_value MEMPHIS_API_TOKEN)")"
+  echo "  MEMPHIS_API_TOKEN"
   echo "    Protects authenticated HTTP routes. Clients must send it as Authorization: Bearer <token>."
-  echo "  MEMPHIS_VAULT_PEPPER ($vault_pepper_status): $(preview_secret "$(env_value MEMPHIS_VAULT_PEPPER)")"
+  echo "  MEMPHIS_VAULT_PEPPER"
   echo "    Anchors the local vault bridge. Rotating it breaks access to existing vault data."
   echo "  Save .env securely before migrating this runtime or reusing the vault."
   echo

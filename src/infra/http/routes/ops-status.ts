@@ -1,5 +1,8 @@
 import { getAppVersion } from '../../../config/paths.js';
-import { formatSurfaceStatusLines, getActiveSurfacesSnapshot } from '../../../core/surface-presence.js';
+import {
+  formatSurfaceStatusLines,
+  getActiveSurfacesSnapshot,
+} from '../../../core/surface-presence.js';
 import type { OrchestrationService } from '../../../modules/orchestration/service.js';
 import { metrics } from '../../logging/metrics.js';
 import { computeHealthSummary } from '../../ops/health-summary.js';
@@ -14,7 +17,7 @@ import {
   getStartupTrustRootStatus,
 } from '../../runtime/startup-state.js';
 import { snapshotTurnTelemetry } from '../../runtime/turn-telemetry.js';
-import { checkForUpdate, peekCachedUpdateResult } from '../../self-update/github-release.js';
+import { peekCachedUpdateResult } from '../../self-update/github-release.js';
 import { getChainAdapterStatus } from '../../storage/chain-adapter.js';
 import { getRustVaultAdapterStatus } from '../../storage/rust-vault-adapter.js';
 import type { SqliteDualApprovalRepository } from '../../storage/sqlite/repositories/dual-approval-repository.js';
@@ -34,7 +37,6 @@ export function registerOpsStatusRoute(
   },
 ): void {
   app.get('/v1/ops/status', async () => {
-    void checkForUpdate(getAppVersion()).catch(() => undefined);
     const providers = await options.orchestration.providersHealth();
     const uptimeSec = Math.floor(process.uptime());
     const health = computeHealthSummary({ providers, uptimeSec });
@@ -71,7 +73,9 @@ export function registerOpsStatusRoute(
           enforced: false,
           backend: safeMode ? 'iptables' : 'none',
           mode: safeMode ? 'degraded' : 'disabled',
-          reason: safeMode ? 'safe mode network capability not evaluated yet' : 'safe mode disabled',
+          reason: safeMode
+            ? 'safe mode network capability not evaluated yet'
+            : 'safe mode disabled',
           checkedAt: new Date().toISOString(),
         },
         trustRoot: getStartupTrustRootStatus(),

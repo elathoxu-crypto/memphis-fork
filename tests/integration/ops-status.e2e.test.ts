@@ -2,12 +2,20 @@ import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import { createAppContainer } from '../../src/app/container.js';
 import { getAppVersion } from '../../src/config/paths.js';
 import type { AppConfig } from '../../src/infra/config/schema.js';
 import { createHttpServer } from '../../src/infra/http/server.js';
+
+const { checkForUpdate } = vi.hoisted(() => ({
+  checkForUpdate: vi.fn().mockResolvedValue(null),
+}));
+vi.mock('../../src/infra/self-update/github-release.js', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../src/infra/self-update/github-release.js')>()),
+  checkForUpdate,
+}));
 
 function cfg(db: string): AppConfig {
   return {
@@ -49,6 +57,7 @@ describe('S3.4 Ops status endpoint', () => {
       headers: { authorization: 'Bearer test-token' },
     });
     expect(res.statusCode).toBe(200);
+    expect(checkForUpdate).not.toHaveBeenCalled();
     const body = res.json() as {
       service: string;
       providers: unknown[];

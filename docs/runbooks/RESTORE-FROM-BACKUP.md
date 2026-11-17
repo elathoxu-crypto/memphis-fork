@@ -53,14 +53,11 @@ mkdir -p "$DRILL" && cd "$DRILL" && tar xzf ~/.memphis/backups/<file>.tar.gz
 # 3. Weryfikacja łańcuchów
 MEMPHIS_DATA_DIR="$DRILL" MEMPHIS_HOME="$DRILL" /home/memphis/.local/share/npm-global/bin/memphis chain verify
 
-# 4. Jeśli verify OK — restore na prod
-memphis backup restore <file>
-
-# 5. Restart
-systemctl --user restart memphis.service
+# 4. Jeśli verify OK — przejdź do procedury „Vault recovery” poniżej.
 ```
 
-**Całość: 5-15 min** jeśli vault jest dostępny.
+Powyższa próba sprawdza kopię łańcuchów. Pełne odtworzenie wymaga również
+pasującego zestawu poświadczeń i danych vaulta.
 
 ---
 
@@ -213,9 +210,11 @@ snapshot is not a vault backup. Neither an operator passphrase nor
 
 Before a production restore, establish which recovery source is available:
 
-1. An existing, working vault on the original host: preserve it through the
-   supported vault/backup workflow before replacing runtime data. Do not assume
-   `backup restore` preserves excluded files; it replaces the data-root contents.
+1. An existing, working vault on the original host: ordinary `backup restore`
+   refuses a target whose runtime vault could be lost or unpaired. Use a fresh,
+   isolated target and a verified recovery set for the matching dotenv, vault
+   files and DID. Keep the original runtime available until the recovered
+   instance decrypts an expected credential and verifies its identity.
 2. A separately protected, complete vault recovery copy: verify the supported
    recovery procedure and availability of its matching keys/passphrase first.
    The archive checksum and SQLite tests do not validate that recovery copy.

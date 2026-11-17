@@ -55,19 +55,15 @@ so operators don't get a silent no-op.
 
 ## HTTP
 
-`GET /v1/ops/status` — adds a top-level `latestVersion` field whose
-shape mirrors the JSON above. The field is `null` until the cache
-has been populated by the first `memphis self-update check`. **Status
-latency never depends on GitHub** — the field reads from a process-
-local cache (`peekCachedUpdateResult`); refreshes happen via explicit
-`check` calls.
+`GET /v1/ops/status` reads update information from its process-local cache
+without querying GitHub. The `latestVersion` field is typically `null` because
+`memphis self-update check` runs in a separate process. Use that command to
+request an update check explicitly.
 
 ## Caching
 
 Each successful GitHub fetch is cached for `MEMPHIS_UPDATE_CACHE_TTL_MS`
-(default 5 min). The default keeps `/status` cheap while bounding the
-number of unauthenticated GitHub API calls to ~12/h per process —
-under the 60/h unauthenticated rate limit.
+(default 5 min). This cache is shared by callers in the same process.
 
 ## Repository override
 

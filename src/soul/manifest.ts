@@ -101,18 +101,8 @@ export function loadSoulManifest(rawEnv: NodeJS.ProcessEnv = process.env): SoulM
     return null;
   }
 
-  // Sprint 1.1 fix: env override must be applied on every read, not only
-  // on write (ensureSoulManifest). Without this, tier-3 elevation flips
-  // MEMPHIS_AUTONOMY_MODE=full in process env but resolveToolPolicy still
-  // sees the on-disk mode (typically 'balanced') because tool-executor
-  // calls loadSoulManifest, not ensureSoulManifest. That gap rationalised
-  // the 2026-04-27 confabulation incident — the bot saw "tier 3 unlocks
-  // full" in the prompt but kept getting PERMISSION_DENIED at runtime.
-  //
-  // Read-side override matches write-side semantics in ensureSoulManifest
-  // (lines 127–134): same env var, same autonomyModeSchema validation,
-  // same precedence. Invalid env values are ignored — fall back to disk
-  // value rather than fail the whole load.
+  // Reflect transient operator overrides in the returned view without
+  // promoting them to the persisted policy. Invalid overrides are ignored.
   const envMode = rawEnv.MEMPHIS_AUTONOMY_MODE;
   if (envMode) {
     const overridden = autonomyModeSchema.safeParse(envMode);
@@ -136,8 +126,19 @@ export function writeSoulManifest(
 }
 
 export function ensureSoulManifest(rawEnv: NodeJS.ProcessEnv = process.env): SoulManifest {
+  const manifestAlreadyExists = existsSync(getSoulManifestPath(rawEnv));
   const existing = loadSoulManifest(rawEnv);
   const fresh = generateSoulManifest(rawEnv);
+
+  // Only initialize missing files. An unreadable or newer manifest belongs
+  // to the operator too. Keep its bytes and avoid assuming stored approvals.
+  if (!manifestAlreadyExists && !existing) {
+    writeSensitiveFile(getSoulManifestPath(rawEnv), JSON.stringify(fresh, null, 2), {
+      onlyIfMissing: true,
+    });
+  } else if (!existing) {
+    fresh.trustRules = [];
+  }
 
   // Preserve original createdAt if manifest already existed
   if (existing?.identity.createdAt) {
@@ -161,7 +162,7 @@ export function ensureSoulManifest(rawEnv: NodeJS.ProcessEnv = process.env): Sou
       fresh.mode = parsed.data as AutonomyMode;
     }
   }
-  if (existing?.trustRules && existing.trustRules.length > 0) {
+  if (existing?.trustRules) {
     fresh.trustRules = existing.trustRules;
   }
   // Preserve cognitive mode
@@ -177,7 +178,6 @@ export function ensureSoulManifest(rawEnv: NodeJS.ProcessEnv = process.env): Sou
     fresh.evolution = { ...fresh.evolution, ...existing.evolution };
   }
 
-  writeSoulManifest(fresh, rawEnv);
   return fresh;
 }
 

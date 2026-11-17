@@ -18,5 +18,12 @@ if (!hasOllamaCli && usingOllama) {
     '[memphis-install] Memphis will still install, but Ollama-backed features will be unavailable until installed.',
   );
   console.warn('[memphis-install] Install Ollama: https://ollama.com/download');
-  console.warn('[memphis-install] Then pull model: ollama pull nomic-embed-text');
+  console.warn(
+    `[memphis-install] For local chat, pull: ollama pull ${process.env.OLLAMA_MODEL || 'qwen2.5-coder:0.5b'}`,
+  );
+  if (process.env.RUST_EMBED_MODE === 'ollama') {
+    console.warn(
+      `[memphis-install] For Ollama embeddings, pull: ollama pull ${process.env.RUST_EMBED_PROVIDER_MODEL || 'nomic-embed-text'}`,
+    );
+  }
 }

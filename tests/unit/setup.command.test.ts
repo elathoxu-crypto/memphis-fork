@@ -4,6 +4,24 @@ import { buildSetupEnv, handleSetupCommand } from '../../src/infra/cli/commands/
 import type { CliContext } from '../../src/infra/cli/context.js';
 
 describe('setup env builder', () => {
+  it('persists local model routing and the API token for the Ollama preset', () => {
+    const built = buildSetupEnv({
+      envPath: '.env',
+      provider: 'ollama',
+      dataDirectory: './data',
+      embeddingMode: 'local',
+      embeddingModel: '',
+      vaultPepper: 'synthetic-test-pepper',
+      apiToken: 'synthetic-api-token',
+    });
+    expect(built.validation.ok).toBe(true);
+    expect(built.content).toContain('DEFAULT_PROVIDER=ollama\n');
+    expect(built.content).toContain('OLLAMA_MODEL=qwen2.5-coder:0.5b\n');
+    expect(built.content).toContain('MEMPHIS_PROVIDER_CASCADE=ollama,local-fallback\n');
+    expect(built.content).toContain('MEMPHIS_API_TOKEN=synthetic-api-token\n');
+    expect(built.env.MEMPHIS_AUTONOMY_MODE).toBeUndefined();
+  });
+
   it('selects stable MiniMax Flash for a new MiniMax setup', () => {
     const built = buildSetupEnv({
       envPath: '.env',
