@@ -3,6 +3,7 @@
 **Status:** resolved
 **Severity:** S2
 **Open items:** 0
+
 ## Problem and change
 
 Recovery checked and published each target in order. A conflict in a later target
@@ -43,7 +44,6 @@ recovery implementation and verify the complete generation. Retain the private
 journal and encrypted snapshots; do not delete pending intent or mix individual
 files from old and new generations. The on-disk journal schema is unchanged.
 
-
 ## Encrypted rotation integration — subsequent verification
 
 `tests/integration/vault-rotation-crash.test.ts` now drives the actual pepper and
@@ -62,7 +62,6 @@ rename syscall wrapper; production crypto and transaction code are not mocked.
 This verifies process crashes, not sudden host power loss or filesystem hardware
 failure. No live credential is rotated. Generic concurrent credential writers,
 full native/TS configuration provenance and all S1 acceptance still need review.
-
 
 ## Concurrent credential writers — subsequent verification
 
@@ -88,7 +87,6 @@ runtime-root configurations, concurrent initialization and native reader snapsho
 consistency are not covered by this lock contract. A rejected stale write must
 be retried from encryption, not by resubmitting the old encrypted entry; a stale
 pepper configuration requires reloading configuration first.
-
 
 ## Native snapshot coordination — subsequent verification
 

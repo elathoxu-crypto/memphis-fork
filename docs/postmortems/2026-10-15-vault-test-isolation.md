@@ -3,6 +3,7 @@
 **Status:** resolved
 **Severity:** S2
 **Open items:** 0
+
 ## TL;DR
 
 The October 14 startup failure came from an incompatible vault state and pepper.

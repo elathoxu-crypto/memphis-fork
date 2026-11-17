@@ -227,7 +227,6 @@ The only code that writes to soul is internal: `appendBlock('soul', ...)` in `sr
 - Re-enabling `memphis-grabber-feed.service` (operator action when video device available).
 - Hardening #10 from `/tmp/memphis-chain-draft-audit.md` (clippy `-D warnings` on the memphis-chain draft) — separate task.
 
-
 ## Related
 
 - [docs/dev/SHUTDOWN-LIFECYCLE.md](../dev/SHUTDOWN-LIFECYCLE.md) — describes the lifecycle that triggered this restart

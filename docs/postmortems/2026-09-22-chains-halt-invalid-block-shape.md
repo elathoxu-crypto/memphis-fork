@@ -8,6 +8,7 @@
 **Severity:** S1 (runtime down + boot-loop)
 **Duration:** ~2h 30m degraded (09:44 first failure → 12:11 clean boot)
 **Detection channel:** systemd restart storm + `journalctl -u memphis` (`code=exited, status=102/n/a`)
+
 ---
 
 ## TL;DR
@@ -228,78 +229,78 @@ audit exists to catch.
 ### Stop the bleed (P0)
 
 - **A1. Move halt audit out of `chains/`.** Change `AUDIT_DIR` in
-      `check.sh` and `verify.sh` to `~/.memphis/audit/halt/`. Use JSONL
-      append-only (`~/.memphis/audit/halt/events.jsonl`), one event per line,
-      no `index`/`prev_hash`/`hash`. Update SKILL.md accordingly.
-      _Owner:_ operator + next session.
-      _Verification:_ `ls ~/.memphis/audit/halt/` after a halt-check; no files
-      under `~/.memphis/chains/halt/`.
+  `check.sh` and `verify.sh` to `~/.memphis/audit/halt/`. Use JSONL
+  append-only (`~/.memphis/audit/halt/events.jsonl`), one event per line,
+  no `index`/`prev_hash`/`hash`. Update SKILL.md accordingly.
+  _Owner:_ operator + next session.
+  _Verification:_ `ls ~/.memphis/audit/halt/` after a halt-check; no files
+  under `~/.memphis/chains/halt/`.
 - **A2. Add `MEMPHIS_CHAINS_ALLOWLIST` config** (env var + `config/`)
-      listing which directories under `chains/` are real chains. Default
-      to the current 10 core chains + `cases.backup-*/` + `journal.backup-*/` + `system.backup-*/`. `verifyChainIntegrity` only scans allowlisted
-      entries; unknown dirs emit a warning to `runtime-watch.log`.
-      _Verification:_ `memphis chain verify --strict` with a stray directory
-      in `chains/` should pass and warn, not crash.
+  listing which directories under `chains/` are real chains. Default
+  to the current 10 core chains + `cases.backup-*/` + `journal.backup-*/` + `system.backup-*/`. `verifyChainIntegrity` only scans allowlisted
+  entries; unknown dirs emit a warning to `runtime-watch.log`.
+  _Verification:_ `memphis chain verify --strict` with a stray directory
+  in `chains/` should pass and warn, not crash.
 - **A3. Verify `RestartPreventExitStatus` actually stops restarts in
-      user-mode systemd.** If it does not, switch the unit to
-      `Restart=no` and add an external watchdog (e.g., a separate
-      `memphis-watcher.service` that runs `memphis doctor --fix` after a
-      single failure, then starts the daemon on green).
-      _Verification:_ force `node … serve` to `exit 102` under test and observe
-      that systemd does not restart it again.
+  user-mode systemd.** If it does not, switch the unit to
+  `Restart=no` and add an external watchdog (e.g., a separate
+  `memphis-watcher.service` that runs `memphis doctor --fix` after a
+  single failure, then starts the daemon on green).
+  _Verification:_ force `node … serve` to `exit 102` under test and observe
+  that systemd does not restart it again.
 - **A4. Hard rate-limit the service unit.**
-      `ini
+  `ini
 StartLimitBurst=5
 StartLimitIntervalSec=300
 `
-      in `memphis.service`. After 5 failed starts in 5 minutes, systemd
-      gives up. Operators must then explicitly `systemctl reset-failed`.
-      _Verification:_ force 5 failures and observe `Inactive (auto-restart
+  in `memphis.service`. After 5 failed starts in 5 minutes, systemd
+  gives up. Operators must then explicitly `systemctl reset-failed`.
+  _Verification:_ force 5 failures and observe `Inactive (auto-restart
 failed)` after burst limit.
 
 ### Detect earlier (P1)
 
 - **B1. Periodic chain integrity scan at runtime** (e.g., every 5 min,
-      cheap — read only header + last block, full verify once per hour).
-      On failure: send Telegram alert + auto-archive the offending dir to
-      `~/.memphis-backup-corrupt-chains/<ts>/` + leave runtime running.
-      _Verification:_ artificially corrupt a non-critical chain block;
-      expect Telegram alert within 5 min and `chains/<name>/` moved to
-      backup.
+  cheap — read only header + last block, full verify once per hour).
+  On failure: send Telegram alert + auto-archive the offending dir to
+  `~/.memphis-backup-corrupt-chains/<ts>/` + leave runtime running.
+  _Verification:_ artificially corrupt a non-critical chain block;
+  expect Telegram alert within 5 min and `chains/<name>/` moved to
+  backup.
 - **B2. Skill loader must dry-run.** `register.sh` / skill install
-      path should: install files → run for 60s in a sandbox → assert no
-      writes under `~/.memphis/` outside expected paths → only then
-      commit the staged files. Currently a skill is staged and effectively
-      live the first time the timer fires.
+  path should: install files → run for 60s in a sandbox → assert no
+  writes under `~/.memphis/` outside expected paths → only then
+  commit the staged files. Currently a skill is staged and effectively
+  live the first time the timer fires.
 - **B3. `memphis doctor` should refuse `start` when
-      `boot-failures.json` had > 5 entries in the last 10 minutes.**
-      Currently the service keeps restarting regardless of the JSON file
-      that exists exactly for this purpose.
+  `boot-failures.json` had > 5 entries in the last 10 minutes.**
+  Currently the service keeps restarting regardless of the JSON file
+  that exists exactly for this purpose.
 
 ### Process (P2)
 
 - **C1. New-skill contract.** Any new skill under
-      `skills/<name>/` must include `compat.test.sh` asserting that any
-      persistent write passes `memphis chain verify --strict` if written
-      under `chains/`, or stays outside `chains/` if sidecar.
-      `memphis self-update` runs `compat.test.sh` of every skill before
-      enabling the timer.
+  `skills/<name>/` must include `compat.test.sh` asserting that any
+  persistent write passes `memphis chain verify --strict` if written
+  under `chains/`, or stays outside `chains/` if sidecar.
+  `memphis self-update` runs `compat.test.sh` of every skill before
+  enabling the timer.
 - **C2. Pre-commit git hook** running `memphis chain verify` over
-      any staged change under `chains/`. Any block failing the schema
-      blocks the commit. Covers future `register.sh`-style manual
-      appends as well.
+  any staged change under `chains/`. Any block failing the schema
+  blocks the commit. Covers future `register.sh`-style manual
+  appends as well.
 - **C3. Document in `docs/SKILLS.md`** the rule: "sidecar audit
-      storage MUST NOT live under `chains/`". Cross-link from this
-      postmortem.
+  storage MUST NOT live under `chains/`". Cross-link from this
+  postmortem.
 
 ### Knowledge (P2)
 
 - **D1.** Add this postmortem to `docs/postmortems/INDEX.md`
-      (create one if missing) and link from `docs/runbooks/SYSTEMD_EXIT_CODES.md`
-      under "exit 102" section.
+  (create one if missing) and link from `docs/runbooks/SYSTEMD_EXIT_CODES.md`
+  under "exit 102" section.
 - **D2.** Update `docs/ROADMAP-CURRENT.md` (or a new entry) noting
-      that `chains/halt/` is deprecated and halt-aware-destructive-ops
-      v0.2 will move to `~/.memphis/audit/halt/`.
+  that `chains/halt/` is deprecated and halt-aware-destructive-ops
+  v0.2 will move to `~/.memphis/audit/halt/`.
 
 ---
 
@@ -372,7 +373,6 @@ ticks there are updated together with this list.
       _Added 2026-11-16 while measuring A2:_ the variable is read by
       `chain-adapter.ts` and set in the operator's `.env`, but the registry that
       documents every environment variable does not list it.
-
 
 ## Open questions
 
@@ -574,7 +574,6 @@ Documentation drift — should be updated in a follow-up commit.
 - Pre-flight check in Rust (issue #04 layer 3) — separate workstream.
 - Replay of the 22 archived halt events into the new
   `~/.memphis/audit/halt/` location — operator choice after A1 lands.
-
 
 ## Related
 

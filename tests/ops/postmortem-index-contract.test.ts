@@ -61,7 +61,7 @@ describe('postmortem index · the generator', () => {
     // The corpus had eleven documents on 2026-11-16.
     expect(rows.length).toBeGreaterThanOrEqual(11);
     for (const row of rows) {
-      expect(row).toMatch(/\| (resolved|open|monitoring|unreadable) \|/);
+      expect(row).toMatch(/\| (resolved|open|monitoring|unreadable)\s+\|/);
     }
   });
 

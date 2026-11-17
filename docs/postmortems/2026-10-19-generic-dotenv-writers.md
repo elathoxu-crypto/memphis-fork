@@ -3,6 +3,7 @@
 **Status:** resolved
 **Severity:** S2
 **Open items:** 0
+
 ## TL;DR
 
 The legacy `upsertEnvVars` and `removeEnvVars` helpers did not apply the initialized

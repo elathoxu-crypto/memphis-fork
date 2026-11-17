@@ -28,6 +28,8 @@ import { readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { format, resolveConfig } from 'prettier';
+
 import {
   readPostmortemCorpus,
   renderPostmortemIndex,
@@ -46,7 +48,10 @@ if (!corpus) {
   process.exit(1);
 }
 
-const table = renderPostmortemIndex(corpus.entries);
+const table = await format(renderPostmortemIndex(corpus.entries), {
+  ...(await resolveConfig(README)),
+  parser: 'markdown',
+});
 
 const current = await readFile(README, 'utf8');
 const startAt = current.indexOf(START);
@@ -58,7 +63,8 @@ if (startAt === -1 || endAt === -1 || endAt < startAt) {
   process.exit(1);
 }
 
-const next = current.slice(0, startAt + START.length) + '\n' + table + '\n' + current.slice(endAt);
+const next =
+  current.slice(0, startAt + START.length) + '\n\n' + table + '\n' + current.slice(endAt);
 
 if (next === current) {
   console.log(`[postmortem-index] OK (${corpus.total} document(s), index in sync)`);

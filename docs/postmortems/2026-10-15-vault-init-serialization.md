@@ -3,6 +3,7 @@
 **Status:** resolved
 **Severity:** S2
 **Open items:** 0
+
 ## Problem and evidence
 
 `vaultInit` checked for existing state before generating and publishing a new

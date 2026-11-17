@@ -77,8 +77,7 @@ const ALLOWLISTED_TOKEN = ['ghp', '_fixture', '-value', '-not', '-a', '-real', '
  * assignment is composed, and what the scanner reads in this file is a
  * call to `join`.
  */
-const plantedAssignment = (value: string): string =>
-  ['const TOKEN = ', `'${value}'`, ';'].join('');
+const plantedAssignment = (value: string): string => ['const TOKEN = ', `'${value}'`, ';'].join('');
 
 const plantedDefault = (value: string): string =>
   ['process.env.TOKEN ?? ', `'${value}'`, ';'].join('');
@@ -187,11 +186,7 @@ describe('default-secret-scan · the allowlist is a list of values with reasons'
       execFileSync('git', ['add', '-A'], { cwd: fixture.dir });
 
       const allowlistPath = path.join(fixture.dir, 'allowlist.tsv');
-      writeFileSync(
-        allowlistPath,
-        `${ALLOWLISTED_TOKEN}\ta fixture, not a credential\n`,
-        'utf8',
-      );
+      writeFileSync(allowlistPath, `${ALLOWLISTED_TOKEN}\ta fixture, not a credential\n`, 'utf8');
 
       const result = fixture.scan(allowlistPath);
       expect(result.status).toBe(0);
