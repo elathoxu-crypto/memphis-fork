@@ -4,6 +4,7 @@
     "tests/fixtures/memory-cold-start-worker.mjs",
     "tests/fixtures/dream-crash-patch.mjs",
     "tools/training/check-preflight-runtime.ts",
+    "scripts/bootstrap-dotenv.mts",
     "scripts/quarterly-exit-test-q2.mjs",
     "scripts/quarterly-mv2-fixture.mjs",
     "src/mcp/server.ts",
