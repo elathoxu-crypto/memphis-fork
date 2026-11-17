@@ -79,7 +79,6 @@ verification-final.json records the final proof; deploy.py --rollback restores t
 single previous JS. Roll back this change before E18-NATIVE-DEBUG and older slices.
 Full S1 acceptance is still open.
 
-
 ## E18-CLI-ERRORS — deployed 2026-10-18
 
 Codex implemented and self-reviewed fixed public failures for secret add/get/list.

@@ -1,4 +1,12 @@
-import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import {
+  chmodSync,
+  existsSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs';
 import { join } from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
