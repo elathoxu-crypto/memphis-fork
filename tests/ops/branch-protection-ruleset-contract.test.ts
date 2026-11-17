@@ -103,10 +103,7 @@ describe('branch protection policy — what must and must not gate a merge', () 
   });
 
   it('does NOT require the Telegram smoke check', () => {
-    // telegram-smoke.yml exits 78 when its secrets are absent, on purpose:
-    // "skipped is not success", so a green row means a message was really sent.
-    // As a required check it could never be green without secrets, and would
-    // block every merge forever. It runs on its own schedule and stays advisory.
+    // The live job is optional and needs a dedicated Telegram bot.
     expect(enforce).not.toContain('{ context: "smoke" }');
     // verify fails if someone adds it later.
     expect(verify).toContain('The Telegram smoke check is required');

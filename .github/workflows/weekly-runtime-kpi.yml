@@ -16,6 +16,8 @@ permissions:
 
 jobs:
   weekly-kpi:
+    # The report is published as an issue. Forks may have Issues disabled.
+    if: github.event.repository.has_issues
     runs-on: ubuntu-latest
     steps:
       - name: Compute weekly KPI

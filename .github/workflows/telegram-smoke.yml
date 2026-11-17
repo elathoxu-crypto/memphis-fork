@@ -29,44 +29,34 @@ on:
       - '.github/workflows/telegram-smoke.yml'
 
 jobs:
+  configuration:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    outputs:
+      configured: ${{ steps.check.outputs.configured }}
+    steps:
+      - name: Check for dedicated test bot credentials
+        id: check
+        env:
+          BOT_TOKEN: ${{ secrets.MEMPHIS_TELEGRAM_SMOKE_BOT_TOKEN }}
+          CHAT_ID: ${{ secrets.MEMPHIS_TELEGRAM_SMOKE_CHAT_ID }}
+        run: |
+          if [[ -z "$BOT_TOKEN" || -z "$CHAT_ID" ]]; then
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+            echo "Telegram live smoke skipped. Dedicated test bot credentials are missing." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+          fi
+
   smoke:
+    needs: configuration
+    if: needs.configuration.outputs.configured == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@v5
 
-      # Every real step below is guarded by this flag, so when secrets are
-      # absent the job ran ZERO steps and still reported `success`. That
-      # reads as "Telegram works" on the run list when nothing was
-      # exercised. 2026-10-07: run 37735415527 = success with no coverage,
-      # while the operator's own box had `telegram: state=missing-token`.
-      #
-      # The last step turns `skipped` into the job's real outcome, so a
-      # green row means the smoke test actually sent a message.
-      - name: Short-circuit when secrets are not configured
-        id: check-secrets
-        run: |
-          if [ -z "${{ secrets.MEMPHIS_TELEGRAM_SMOKE_BOT_TOKEN }}" ] || \
-             [ -z "${{ secrets.MEMPHIS_TELEGRAM_SMOKE_CHAT_ID }}" ]; then
-            echo "Telegram smoke-test secrets not configured — skipping."
-            echo "skipped=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "skipped=false" >> "$GITHUB_OUTPUT"
-          fi
-
-      - name: Report coverage (skipped is not success)
-        if: always()
-        env:
-          SKIPPED: ${{ steps.check-secrets.outputs.skipped }}
-        run: |
-          if [ "$SKIPPED" = "true" ]; then
-            echo "::notice title=Telegram smoke skipped::Secrets not configured — no Telegram path was exercised."
-            exit 78
-          fi
-          echo "Telegram smoke test executed against the live API."
-
       - uses: actions/setup-node@v5
-        if: steps.check-secrets.outputs.skipped != 'true'
         with:
           # Codex Round 6 P2 fix (PR #125): project declares
           # `"engines": { "node": ">=22" }` — using 20 here made the
@@ -75,15 +65,12 @@ jobs:
           cache: npm
 
       - name: Install
-        if: steps.check-secrets.outputs.skipped != 'true'
         run: npm ci
 
       - name: Build
-        if: steps.check-secrets.outputs.skipped != 'true'
         run: npm run build
 
       - name: Run smoke test against live Telegram API
-        if: steps.check-secrets.outputs.skipped != 'true'
         env:
           MEMPHIS_TELEGRAM_BOT_TOKEN: ${{ secrets.MEMPHIS_TELEGRAM_SMOKE_BOT_TOKEN }}
           MEMPHIS_TELEGRAM_ALLOWED_USER_IDS: ${{ secrets.MEMPHIS_TELEGRAM_SMOKE_CHAT_ID }}

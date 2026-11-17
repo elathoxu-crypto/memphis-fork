@@ -65,6 +65,10 @@ describe('automerge — triggers on state, not on a label', () => {
 });
 
 describe('automerge — required checks come from the ruleset', () => {
+  it('runs automatic merges only in the source repository', () => {
+    expect(doc.jobs.automerge.if).toContain('github.event.repository.fork == false &&');
+  });
+
   it('reads them from the API instead of hardcoding a list', () => {
     // A hardcoded list is a second place that can go stale, the same way a
     // hand-maintained metric drifts from the thing it measures.
