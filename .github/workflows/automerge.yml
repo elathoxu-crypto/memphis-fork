@@ -122,19 +122,12 @@ jobs:
     # option — GitHub does not emit it for check suites it created itself, which
     # every check here is (PR #670 switched to it, and it never fired).
     #
-    # The `if` is a conjunction because GitHub's expression parser rejects the
-    # ternary form in a job-level `if`. Adding that ternary to the previous
-    # `main` reproduced a silent failure: the workflow stopped being registered,
-    # every trigger went quiet, and each push produced a run named after the
-    # FILE PATH with conclusion `failure` and no jobs — "This run likely failed
-    # because of a workflow file issue", with no detail. Bisection, 2026-10-10.
-    #
-    # `schedule` is listed first so the job runs at all when there is no pull
-    # request object: on a schedule `github.event.pull_request` is null, and
-    # dereferencing it in an `if` is an error rather than a false.
+    # Forks manage their own merges. Upstream requires a readable policy
+    # with required checks before it can merge a pull request.
     if: >-
-      github.event_name != 'pull_request_target' ||
-      github.event.pull_request.draft == false
+      github.event.repository.fork == false &&
+      (github.event_name != 'pull_request_target' ||
+       github.event.pull_request.draft == false)
     runs-on: ubuntu-latest
     steps:
       # `workflow_run` payloads carry no `pull_request` object, so the PR has to
